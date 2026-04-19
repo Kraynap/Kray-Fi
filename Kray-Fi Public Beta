@@ -1,0 +1,145 @@
+sudo tee /usr/local/bin/kray-fi > /dev/null << 'EOF'
+#!/bin/bash
+
+G='\033[1;32m'; R='\033[1;31m'; Y='\033[1;33m'; C='\033[1;36m'; P='\033[1;35m'; NC='\033[0m'
+
+legal_notice() {
+    clear
+    echo -e "${R}[!] LEGAL NOTICE${NC}"
+    echo -e "${Y}----------------------------------------${NC}"
+    echo -e "Authorized use only. Kraynap is not liable."
+    echo -e "${Y}----------------------------------------${NC}"
+    echo -ne "${G} Confirm with 'YES': ${NC}"
+    read CONFIRM
+    [[ "$CONFIRM" != "YES" ]] && exit 1
+}
+
+draw_tower() {
+    echo -e "${G}"
+    cat << "TOWER"
+          ⢠⡄⠀⠀⣠⡄⠀⠀⣠⠄⠀⠀⠀⠀⠠⣄⠀⠀⢠⣄⠀⠀⢠⡄
+          ⢸⠀⠀⠀⣿⠀⠀⠀⡟⠀⢠⣶⣶⡄⠀⢻⠀⠀⠀⣿⠀⠀⠀⡇
+          ⢸⡀⠀⠀⣿⡀⠀⠀⣷⠀⠈⠛⠛⠁⠀⣾⠀⠀⢀⣿⠀⠀⢀⡇
+          ⠘⣇⠀⠀⠘⣷⡀⠀⠈⠃⣸⡇⢸⣇⠘⠁⠀⢀⣾⠃⠀⠀⣸⠃
+          ⠀⠀⠀⠀⠀⠀⠀⣾⠀⠀⠀⠀⠀⠀⣷
+          ⠀⠀⠀⠀⠀⠀⣸⡟⣛⣷⣶⣶⣾⣛⢻⣇
+          ⠀⠀⠀⠀⠀⢀⣿⢿⣯⣍⣀⣀⣩⣽⡿⣿⡀
+          ⠀⠀⠀⠀⠀⣼⣇⣤⣴⠿⠛⠛⠿⣦⣤⣸⣧
+TOWER
+    echo -e "${NC}"
+}
+
+draw_logo() {
+    echo -e "${P} █  █ █▀▀█ █▀▀█ █  █${NC}"
+    echo -e "${P} █▀▀▄ █▄▄▀ █▄▄█ ▀▄▄█${NC}"
+    echo -e "${P} ▀  ▀ ▀ ▀▀ ▀  ▀  ▄▄▀${NC}"
+    echo -e "${R}      ----------    ${NC}"
+    echo -e "${G}      █▀▀  ░█░       ${NC}"
+    echo -e "${G}      █▀▀  ░█░       ${NC}"
+    echo -e "${G}      ▀   ░▀░       ${NC}"
+}
+
+scan_neighbors() {
+    echo -e "${Y}[*] Scanning for networks... (Press Ctrl+C to stop)${NC}"
+    sleep 1
+    sudo airodump-ng --manufacturer --uptime --beacons --band abg $IFACE
+}
+
+deep_scan() {
+    read -p "Target BSSID: " TBSSID
+    read -p "Target Channel: " TCH
+    echo -e "${G}[+] Deep scanning $TBSSID on ch$TCH...${NC}"
+    sudo airodump-ng -c $TCH --bssid $TBSSID --manufacturer --uptime $IFACE
+}
+
+watch_clients() {
+    read -p "Target BSSID: " TBSSID
+    read -p "Target Channel: " TCH
+    echo -e "${Y}[*] Watching connected devices on $TBSSID...${NC}"
+    sudo airodump-ng -c $TCH --bssid $TBSSID $IFACE
+}
+
+signal_stats() {
+    echo -e "${Y}[*] Live signal stats (Ctrl+C to stop)${NC}"
+    while true; do
+        clear
+        echo -e "${P}── Signal: $IFACE ──────────────────────${NC}"
+        iwconfig $IFACE 2>/dev/null | grep -E "ESSID|Signal|Bit Rate|Link Quality|Freq"
+        echo -e "${P}───────────────────────────────────────${NC}"
+        sleep 2
+    done
+}
+
+toggle_monitor() {
+    MODE=$(iw dev "$IFACE" info | grep type | awk '{print $2}')
+    if [[ "$MODE" == "monitor" ]]; then
+        sudo ip link set "$IFACE" down && sudo iw dev "$IFACE" set type managed && sudo ip link set "$IFACE" up
+        echo -e "${G}[+] Managed mode.${NC}"
+    else
+        sudo ip link set "$IFACE" down && sudo iw dev "$IFACE" set type monitor && sudo ip link set "$IFACE" up
+        echo -e "${G}[+] Monitor mode.${NC}"
+    fi
+    sleep 1
+}
+
+oui_lookup() {
+    read -p "Enter MAC address: " VMAC
+    PREFIX=$(echo "$VMAC" | tr '[:lower:]' '[:upper:]' | tr -d ':-' | cut -c1-6)
+    OUI_DB="/usr/share/ieee-data/oui.txt"
+    if [[ -f "$OUI_DB" ]]; then
+        RESULT=$(grep -i "$PREFIX" "$OUI_DB" | head -3)
+        [[ -n "$RESULT" ]] && echo -e "${G}$RESULT${NC}" || echo -e "${Y}Not found.${NC}"
+    else
+        echo -e "${Y}[!] Run: sudo apt install ieee-data${NC}"
+        echo -e "${C}Prefix: $PREFIX — check macvendors.com${NC}"
+    fi
+    read -p "Press Enter.." _
+}
+
+probe_hardware() {
+    mapfile -t IFACES < <(iw dev | grep Interface | awk '{print $2}')
+    echo -e "\nID | IFACE | DRIVER | MODE"
+    echo -e "----------------------------------------"
+    for i in "${!IFACES[@]}"; do
+        IF="${IFACES[$i]}"
+        DRV=$(ethtool -i "$IF" 2>/dev/null | grep driver | awk '{print $2}')
+        MODE=$(iw dev "$IF" info | grep type | awk '{print $2}')
+        echo -e "$i  | ${G}$IF${NC} | ${Y}${DRV:-N/A}${NC} | $MODE"
+    done
+    read -p "Select Interface ID > " IF_ID
+    IFACE=${IFACES[$IF_ID]}
+    [[ -z "$IFACE" ]] && exit 1
+}
+
+legal_notice
+clear
+draw_tower
+draw_logo
+probe_hardware
+
+while true; do
+    clear
+    draw_logo
+    M=$(iw dev "$IFACE" info | grep type | awk '{print $2}')
+    echo -e "${P}-------------------------------------------${NC}"
+    echo -e " IF:${G} $IFACE${NC} | MODE:${Y} $M${NC} | ${C}DEV:${NC} @kraynap"
+    echo -e "${P}-------------------------------------------${NC}"
+    echo -e " 1) Neighbors (Scan)       5) Signal Stats"
+    echo -e " 2) Deep Scan              6) Identity Check (OUI)"
+    echo -e " 3) Client Watch           7) Coffee Break"
+    echo -e " 4) Monitor Mode Toggle    8) EXIT"
+    echo -e "${P}-------------------------------------------${NC}"
+    read -p "kray-fi# " opt
+    case $opt in
+        1) scan_neighbors ;;
+        2) deep_scan ;;
+        3) watch_clients ;;
+        4) toggle_monitor ;;
+        5) signal_stats ;;
+        6) oui_lookup ;;
+        7) clear; echo -e "${Y}   ~ ~\n  |~~|\n  |__|${NC}\n\n${G}Optionally active. Truly ghost.${NC}"; sleep 3 ;;
+        8) exit 0 ;;
+    esac
+done
+EOF
+sudo chmod +x /usr/local/bin/kray-fi
