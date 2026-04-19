@@ -20,7 +20,7 @@ sudo chmod +x /usr/local/bin/kray-fi
 
 Then just type kray-fi to launch.
 
-Tips to support development and future projects: Ko-fi.com/kraynap
+Tips to support development and future projects: ko-fi.com/kraynap
 
 <img width="1003" height="721" alt="1000013248" src="https://github.com/user-attachments/assets/826103dc-e4a3-47cb-8717-f07b2a796372" />
 
